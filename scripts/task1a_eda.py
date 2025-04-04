@@ -6,9 +6,10 @@ from datetime import datetime
 import re
 import os
 
-# Create output directory if it doesn't exist
+# Create output directory for Task 1a only
 output_dir = 'task1a_outputs'
 os.makedirs(output_dir, exist_ok=True)
+os.makedirs('data', exist_ok=True)  # Keep data directory creation for consistency
 
 # Set the plotting style
 plt.style.use('ggplot')
@@ -23,8 +24,10 @@ scatter_palette = "#fb8072"
 box_palette = sns.color_palette('pastel')
 
 # Load the data
+print("=== TASK 1A: EXPLORATORY DATA ANALYSIS ===")
 print("Loading dataset...")
 df = pd.read_csv('data/ODI-2025.csv', sep=';')
+print(f"Loaded dataset: {df.shape[0]} records, {df.shape[1]} attributes")
 
 # Basic dataset information
 print("\n=== DATASET OVERVIEW ===")
@@ -555,43 +558,47 @@ print("\nAverage stress level by ChatGPT usage:")
 stress_by_chatgpt = df.groupby('I have used ChatGPT to help me with some of my study assignments ')['Stress_Level_Clean'].mean()
 print(stress_by_chatgpt)
 
-# Save the analysis report as a text file
-with open(f'{output_dir}/analysis_report.txt', 'w') as f:
-    f.write("=== ODI-2025 DATASET ANALYSIS REPORT ===\n\n")
-    f.write(f"Number of records: {df.shape[0]}\n")
-    f.write(f"Number of attributes: {df.shape[1]}\n\n")
-    
-    f.write("=== PROGRAM DISTRIBUTION ===\n")
-    f.write(f"Number of unique programs: {len(program_counts)}\n")
-    f.write("Top 10 programs:\n")
-    for program, count in program_counts.head(10).items():
-        f.write(f"{program}: {count}\n")
-    
-    f.write("\n=== GENDER DISTRIBUTION ===\n")
-    for gender, count in gender_counts.items():
-        f.write(f"{gender}: {count} ({count/len(df)*100:.1f}%)\n")
-    
-    f.write("\n=== CHATGPT USAGE ===\n")
-    chatgpt_counts = df['I have used ChatGPT to help me with some of my study assignments '].value_counts()
-    for response, count in chatgpt_counts.items():
-        f.write(f"{response}: {count} ({count/len(df)*100:.1f}%)\n")
-    
-    f.write("\n=== STRESS LEVEL ANALYSIS ===\n")
-    f.write("Statistics for all values:\n")
-    f.write(f"{df['Stress_Level_Clean'].describe().to_string()}\n\n")
-    
-    f.write("Statistics for values in 0-100 range:\n")
-    f.write(f"{normal_range.describe().to_string()}\n\n")
-    
-    f.write(f"Number of stress level outliers: {len(stress_outliers)}\n")
-    
-    f.write("\n=== SPORTS HOURS ANALYSIS ===\n")
-    f.write("Statistics for all values:\n")
-    f.write(f"{df['Sports_Hours_Clean'].describe().to_string()}\n\n")
-    
-    f.write(f"Statistics for values in 0-{reasonable_max_sports} range:\n")
-    f.write(f"{reasonable_range.describe().to_string()}\n\n")
-    
-    f.write(f"Number of sports hours outliers: {len(sports_outliers)}\n")
+# Add a plot showing stress level by ChatGPT usage
+plt.figure(figsize=(12, 8))
+# Filter to normal stress level range
+normal_stress = df[df['Stress_Level_Clean'].between(0, 100)]
+
+# Create the boxplot with custom styling
+ax = sns.boxplot(
+    x='I have used ChatGPT to help me with some of my study assignments ', 
+    y='Stress_Level_Clean', 
+    data=normal_stress, 
+    palette=box_palette,
+    width=0.6,
+    fliersize=5,
+    linewidth=1.5
+)
+
+# Add individual data points with jitter for better visualization
+sns.stripplot(
+    x='I have used ChatGPT to help me with some of my study assignments ', 
+    y='Stress_Level_Clean', 
+    data=normal_stress,
+    color='black',
+    alpha=0.4,
+    size=4,
+    jitter=True
+)
+
+# Add mean markers with values
+means = normal_stress.groupby('I have used ChatGPT to help me with some of my study assignments ')['Stress_Level_Clean'].mean()
+for i, mean_val in enumerate(means):
+    ax.plot(i, mean_val, marker='o', color='white', markersize=8, markeredgecolor='black')
+    ax.text(i, mean_val + 3, f'Mean: {mean_val:.1f}', ha='center', color='black', fontsize=10)
+
+# Customize labels
+plt.title('Stress Level by ChatGPT Usage (0-100 Range)', fontsize=16, pad=20)
+plt.xlabel('ChatGPT Usage', fontsize=14)
+plt.ylabel('Stress Level', fontsize=14)
+plt.xticks(fontsize=12)
+plt.yticks(fontsize=12)
+plt.grid(True, axis='y', alpha=0.3)
+plt.tight_layout()
+plt.savefig(f'{output_dir}/stress_by_chatgpt.png', dpi=300, bbox_inches='tight')
 
 print(f"\nAnalysis complete! All results saved to '{output_dir}/' directory.") 

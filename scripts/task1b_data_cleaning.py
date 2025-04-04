@@ -6,10 +6,12 @@ from datetime import datetime
 import re
 import os
 from sklearn.impute import SimpleImputer, KNNImputer
+import dateutil.parser
 
-# Create output directory for Task 1b
+# Create output directory for Task 1b only
 output_dir = 'task1b_outputs'
 os.makedirs(output_dir, exist_ok=True)
+os.makedirs('data', exist_ok=True)  # Keep data directory creation for consistency
 
 # Set the plotting style
 plt.style.use('ggplot')
@@ -96,6 +98,289 @@ def clean_sports_hours(value):
 # First pass cleaning - convert to appropriate types
 df_clean['Stress_Level_Clean'] = df_clean['What is your stress level (0-100)?'].apply(clean_stress_level)
 df_clean['Sports_Hours_Clean'] = df_clean['How many hours per week do you do sports (in whole hours)? '].apply(clean_sports_hours)
+
+# Clean and standardize bedtime to 24-hour format using a more flexible approach
+def standardize_bedtime(bedtime):
+    if pd.isna(bedtime) or bedtime == '' or bedtime == '-':
+        return bedtime  # Keep as is, don't convert to NaN
+    
+    try:
+        # Convert to string and lowercase
+        bedtime_str = str(bedtime).lower().strip()
+        
+        # Handle special cases first
+        if bedtime_str in ['night', 'late', 'evening', 'midnight']:
+            return '00:00'  # Default for vague night references
+        if bedtime_str in ['early', 'morning']:
+            return '07:00'  # Default for vague morning references
+        
+        # Extract AM/PM indicators
+        is_pm = any(pm in bedtime_str for pm in ['pm', 'p.m', 'p.m.', 'evening', 'night'])
+        is_am = any(am in bedtime_str for am in ['am', 'a.m', 'a.m.', 'morning'])
+        
+        # Remove all non-numeric characters except for colon and period
+        cleaned = re.sub(r'[^0-9:.]', '', bedtime_str)
+        
+        # Handle different formats
+        if ':' in cleaned:  # HH:MM format
+            parts = cleaned.split(':')
+            if len(parts) >= 2:
+                hour, minute = int(float(parts[0])), int(float(parts[1]))
+        elif '.' in cleaned:  # HH.MM format
+            parts = cleaned.split('.')
+            if len(parts) >= 2:
+                hour, minute = int(float(parts[0])), int(float(parts[1]))
+        else:  # Just hours
+            if cleaned:
+                hour = int(float(cleaned))
+                minute = 0
+            else:
+                return bedtime  # Unable to parse, keep original
+        
+        # Special handling for bedtime context - assume most bedtimes are PM
+        # If it's 8-12 without AM/PM indicator, assume it's evening (per requirement)
+        if not is_am and not is_pm:
+            if 8 <= hour <= 12:  # Specific instruction to assume evening time
+                is_pm = True
+            elif 1 <= hour <= 7:  # Early morning hours after midnight
+                is_am = True
+        
+        # Now apply AM/PM conversion to 24-hour format
+        if is_pm and hour < 12:
+            hour += 12
+        elif is_am and hour == 12:
+            hour = 0
+        
+        # Some sanity checks
+        if hour > 23:
+            hour = hour % 24
+        if minute > 59:
+            minute = minute % 60
+            
+        return f"{hour:02d}:{minute:02d}"
+    except Exception as e:
+        # If any error occurs, retain the original value rather than making it NaN
+        return bedtime
+
+# Clean and standardize birthday to dd-mm-yyyy format using a more flexible approach
+def standardize_birthday(birthday, timestamp=None):
+    if pd.isna(birthday) or birthday == '' or birthday == '-':
+        return birthday  # Keep as is, don't convert to NaN
+    
+    try:
+        # Convert to string and lowercase for consistent processing
+        birthday_str = str(birthday).lower().strip()
+        
+        # Handle relative dates (yesterday, tomorrow, etc.)
+        if timestamp and any(word in birthday_str for word in ['yesterday', 'today', 'tomorrow']):
+            timestamp_date = pd.to_datetime(timestamp).date()
+            
+            if 'yesterday' in birthday_str:
+                # Yesterday relative to timestamp
+                result_date = timestamp_date - pd.Timedelta(days=1)
+                return result_date.strftime('%d-%m-%Y')
+            elif 'today' in birthday_str:
+                # Today relative to timestamp
+                return timestamp_date.strftime('%d-%m-%Y')
+            elif 'tomorrow' in birthday_str:
+                # Tomorrow relative to timestamp
+                result_date = timestamp_date + pd.Timedelta(days=1)
+                return result_date.strftime('%d-%m-%Y')
+        
+        # Special case handling for obviously non-date values - keep these as they are
+        if birthday_str in ['not willing to say', 'unknown', 'null', 'nan', 'none', 
+                           'nothing', 'secret', '?', 'no', 'yesterday', 'today', 'tomorrow']:
+            return birthday
+        
+        # Special case for years with '00' - these are 2000 (per requirement)
+        if re.search(r'\/00$|\-00$|\.00$|^00\/|^00\-|^00\.|^00$', birthday_str):
+            # Extract day and month if available
+            day_month_match = re.search(r'(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.]00', birthday_str)
+            if day_month_match:
+                day, month = day_month_match.groups()
+                return f"{int(day):02d}-{int(month):02d}-2000"
+            else:
+                # Just '00' with no other info - default to 01-01-2000
+                return "01-01-2000"
+        
+        # Try dateutil parser for flexible date parsing
+        try:
+            parsed_date = dateutil.parser.parse(birthday_str, fuzzy=True)
+            
+            # Special handling for years like '00' which should be 2000
+            if parsed_date.year == 2000 and re.search(r'00', birthday_str):
+                return parsed_date.strftime('%d-%m-%Y')
+            
+            # Check if only month and day were provided (no year)
+            year_present = re.search(r'\b(19\d{2}|20\d{2})\b', birthday_str) or re.search(r'\b\d{4}\b', birthday_str)
+            
+            # If no year was provided in the original string, return the date with just month and day
+            if not year_present and not parsed_date.year == datetime.now().year:
+                # Return just the month and day without imputing a year
+                return parsed_date.strftime('%d-%m')
+            
+            # If we have a valid year, validate it's within a reasonable range
+            if 1900 <= parsed_date.year <= 2020:
+                return parsed_date.strftime('%d-%m-%Y')
+        except:
+            pass  # If it fails, continue with other methods
+        
+        # Check for year '00' in various formats and convert to 2000
+        if re.search(r'(\d{1,2})[-/\.](\d{1,2})[-/\.]00', birthday_str):
+            match = re.search(r'(\d{1,2})[-/\.](\d{1,2})[-/\.]00', birthday_str)
+            if match:
+                # Check if it's DD-MM-00 or MM-DD-00 format
+                part1, part2 = match.groups()
+                if int(part1) <= 31 and int(part2) <= 12:  # Likely DD-MM format
+                    return f"{int(part1):02d}-{int(part2):02d}-2000"
+                elif int(part2) <= 31 and int(part1) <= 12:  # Likely MM-DD format
+                    return f"{int(part2):02d}-{int(part1):02d}-2000"
+            
+        # Try to handle common formats that might confuse the parser
+        # Check for common European format: DD-MM-YYYY or DD/MM/YYYY
+        if re.match(r'^\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}$', birthday_str):
+            parts = re.split(r'[-/\.]', birthday_str)
+            if len(parts) == 3:
+                day, month, year = parts
+                # Special case for '00' as year - convert to 2000
+                if year == '00':
+                    year = '2000'
+                # Ensure 4-digit year for others
+                elif len(year) == 2:
+                    year = '19' + year if int(year) > 50 else '20' + year
+                try:
+                    parsed_date = datetime(int(year), int(month), int(day))
+                    return parsed_date.strftime('%d-%m-%Y')
+                except:
+                    pass
+        
+        # Check for American format: MM-DD-YYYY or MM/DD/YYYY
+        if re.match(r'^\d{1,2}[-/\.]\d{1,2}[-/\.]\d{2,4}$', birthday_str):
+            parts = re.split(r'[-/\.]', birthday_str)
+            if len(parts) == 3 and int(parts[0]) <= 12:  # Could be month
+                month, day, year = parts
+                # Special case for '00' as year - convert to 2000
+                if year == '00':
+                    year = '2000'
+                # Ensure 4-digit year for others
+                elif len(year) == 2:
+                    year = '19' + year if int(year) > 50 else '20' + year
+                try:
+                    parsed_date = datetime(int(year), int(month), int(day))
+                    return parsed_date.strftime('%d-%m-%Y')
+                except:
+                    pass
+        
+        # Check for YYYYMMDD format
+        if re.match(r'^\d{8}$', birthday_str):
+            year = birthday_str[:4]
+            month = birthday_str[4:6]
+            day = birthday_str[6:8]
+            # Special case for years starting with '00'
+            if year == '0000':
+                year = '2000'
+            try:
+                parsed_date = datetime(int(year), int(month), int(day))
+                return parsed_date.strftime('%d-%m-%Y')
+            except:
+                pass
+        
+        # Check for DDMMYYYY format (no separators)
+        if re.match(r'^\d{8}$', birthday_str):
+            day = birthday_str[:2]
+            month = birthday_str[2:4]
+            year = birthday_str[4:8]
+            # Special case for years ending with '0000'
+            if year == '0000':
+                year = '2000'
+            try:
+                parsed_date = datetime(int(year), int(month), int(day))
+                return parsed_date.strftime('%d-%m-%Y')
+            except:
+                pass
+        
+        # Extract year-month-day pattern using regex
+        year_month_day = re.search(r'(\d{4})[-/\.](\d{1,2})[-/\.](\d{1,2})', birthday_str)
+        if year_month_day:
+            year, month, day = year_month_day.groups()
+            try:
+                parsed_date = datetime(int(year), int(month), int(day))
+                return parsed_date.strftime('%d-%m-%Y')
+            except:
+                pass
+        
+        # Extract natural language dates (like "September 5")
+        month_names = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 
+                     'august', 'september', 'october', 'november', 'december']
+        
+        for i, month_name in enumerate(month_names, 1):
+            if month_name in birthday_str:
+                # Try to find day
+                day_match = re.search(r'\b(\d{1,2})(st|nd|rd|th)?\b', birthday_str)
+                day = day_match.group(1) if day_match else '1'  # Default to 1 if no day
+                
+                # Try to find year, if not found don't impute
+                year_match = re.search(r'\b(19\d{2}|20\d{2})\b', birthday_str)
+                if year_match:
+                    year = year_match.group(1)
+                    # Special case for '00' in year
+                    if year == '00' or year == '2000':
+                        year = '2000'
+                    try:
+                        parsed_date = datetime(int(year), i, int(day))
+                        return parsed_date.strftime('%d-%m-%Y')
+                    except:
+                        pass
+                else:
+                    # If only month and day, return without year
+                    try:
+                        # Just to validate the date is valid
+                        parsed_date = datetime(2000, i, int(day))  # Use a leap year as reference
+                        return f"{int(day):02d}-{i:02d}"  # Return in DD-MM format
+                    except:
+                        pass
+        
+        # If we just have a year, use January 1st as default date with the year
+        year_only = re.search(r'\b(19\d{2}|20\d{2}|00)\b', birthday_str)
+        if year_only:
+            year = year_only.group(1)
+            if year == '00':
+                year = '2000'
+            return f"01-01-{year}"
+        
+        # If we just have a month, return the month without imputing year
+        for i, month_name in enumerate(month_names, 1):
+            if month_name in birthday_str:
+                return f"01-{i:02d}"  # Return in DD-MM format with day=1
+        
+        # If nothing worked, preserve the original value
+        return birthday
+        
+    except Exception as e:
+        # If any error occurs, retain the original value
+        return birthday
+
+# Apply the bedtime standardization
+df_clean['Bedtime_Clean'] = df_clean['Time you went to bed Yesterday'].apply(standardize_bedtime)
+
+# Apply the birthday standardization with timestamp info
+df_clean['Birthday_Clean'] = df_clean.apply(
+    lambda row: standardize_birthday(row['When is your birthday (date)?'], row['Timestamp']), 
+    axis=1
+)
+
+# Print some statistics about the standardized fields
+print("\nBedtime Standardization Stats:")
+print(f"Original null values: {df_clean['Time you went to bed Yesterday'].isna().sum()}")
+print(f"Cleaned null values: {df_clean['Bedtime_Clean'].isna().sum()}")
+print(f"Unique values before cleaning: {df_clean['Time you went to bed Yesterday'].nunique()}")
+print(f"Unique values after cleaning: {df_clean['Bedtime_Clean'].nunique()}")
+
+print("\nBirthday Standardization Stats:")
+print(f"Original null values: {df_clean['When is your birthday (date)?'].isna().sum()}")
+print(f"Cleaned null values: {df_clean['Birthday_Clean'].isna().sum()}")
+print(f"Unique values before cleaning: {df_clean['When is your birthday (date)?'].nunique()}")
+print(f"Unique values after cleaning: {df_clean['Birthday_Clean'].nunique()}")
 
 # ==========================================
 # STEP 2: REMOVING EXTREME AND INCORRECT VALUES
@@ -518,12 +803,12 @@ final_columns = [
     'DB_Experience',
     'What is your gender?',
     'I have used ChatGPT to help me with some of my study assignments ',
-    'When is your birthday (date)?',
+    'Birthday_Clean',
     'How many students do you estimate there are in the room?',
     'Stress_Level_Clean',
     'Sports_Hours_Clean',
     'Give a random number',
-    'Time you went to bed Yesterday',
+    'Bedtime_Clean',
     'What makes a good day for you (1)?',
     'What makes a good day for you (2)?'
 ]
@@ -537,25 +822,20 @@ df_final = df_final[final_columns].rename(columns={
     'DB_Experience': 'Databases_Experience',
     'What is your gender?': 'Gender',
     'I have used ChatGPT to help me with some of my study assignments ': 'ChatGPT_Usage',
-    'When is your birthday (date)?': 'Birthday',
+    'Birthday_Clean': 'Birthday',
     'How many students do you estimate there are in the room?': 'Estimated_Students',
     'Stress_Level_Clean': 'Stress_Level',
     'Sports_Hours_Clean': 'Sports_Hours',
     'Give a random number': 'Random_Number',
-    'Time you went to bed Yesterday': 'Bedtime',
+    'Bedtime_Clean': 'Bedtime',
     'What makes a good day for you (1)?': 'Good_Day_Factor_1',
     'What makes a good day for you (2)?': 'Good_Day_Factor_2'
 })
 
-# Save the cleaned dataset to both the output directory and the data folder
-output_csv_path = f'{output_dir}/ODI-2025_cleaned.csv'
+# Save the cleaned dataset to the data folder
 data_folder_csv_path = 'data/ODI-2025_cleaned.csv'
-
-df_final.to_csv(output_csv_path, index=False)
 df_final.to_csv(data_folder_csv_path, index=False)
-
-print(f"Cleaned dataset saved to {output_csv_path}")
-print(f"Cleaned dataset also saved to {data_folder_csv_path}")
+print(f"Cleaned dataset saved to {data_folder_csv_path}")
 print(f"Final dataset: {df_final.shape[0]} records, {df_final.shape[1]} attributes")
 
 # ==========================================
@@ -621,4 +901,45 @@ with open(f'{output_dir}/data_cleaning_report.txt', 'w') as f:
     f.write("- Imputed missing values using KNN approach\n")
     f.write("- Renamed columns for clarity\n")
 
-print("\nTask 1b completed! All results saved to the 'task1b_outputs/' directory.") 
+print("\nTask 1b completed! All results saved to the 'task1b_outputs/' directory.")
+
+# Add visualization of stress level by ChatGPT usage
+plt.figure(figsize=(12, 8))
+
+# Create the boxplot with custom styling
+ax = sns.boxplot(
+    x='ChatGPT_Usage', 
+    y='Stress_Level', 
+    data=df_final, 
+    palette=box_palette,
+    width=0.6,
+    fliersize=5,
+    linewidth=1.5
+)
+
+# Add individual data points with jitter for better visualization
+sns.stripplot(
+    x='ChatGPT_Usage', 
+    y='Stress_Level', 
+    data=df_final,
+    color='black',
+    alpha=0.4,
+    size=4,
+    jitter=True
+)
+
+# Add mean markers with values
+means = df_final.groupby('ChatGPT_Usage')['Stress_Level'].mean()
+for i, mean_val in enumerate(means):
+    ax.plot(i, mean_val, marker='o', color='white', markersize=8, markeredgecolor='black')
+    ax.text(i, mean_val + 3, f'Mean: {mean_val:.1f}', ha='center', color='black', fontsize=10)
+
+# Customize labels
+plt.title('Stress Level by ChatGPT Usage (After Imputation)', fontsize=16, pad=20)
+plt.xlabel('ChatGPT Usage', fontsize=14)
+plt.ylabel('Stress Level', fontsize=14)
+plt.xticks(fontsize=12)
+plt.yticks(fontsize=12)
+plt.grid(True, axis='y', alpha=0.3)
+plt.tight_layout()
+plt.savefig(f'{output_dir}/stress_by_chatgpt_imputed.png', dpi=300, bbox_inches='tight') 
