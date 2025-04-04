@@ -7,11 +7,13 @@ This repository contains code and analysis for Data Mining Assignment 1, focusin
 - `data/`: Contains dataset files
   - `ODI-2025.csv`: Original dataset
   - `ODI-2025_cleaned.csv`: Cleaned dataset (output of Task 1b)
+  - `ODI-2025_engineered.csv`: Dataset with engineered features (output of Task 1c)
   - `dataset_mood_smartphone.csv`: Additional dataset for future tasks
 
 - `scripts/`: Contains Python scripts
   - `task1a_eda.py`: Exploratory data analysis script for Task 1a
   - `task1b_data_cleaning.py`: Data cleaning script for Task 1b
+  - `task1c_feature_engineering.py`: Feature engineering script for Task 1c
 
 - `task1a_outputs/`: Contains Task 1a visualizations and analysis reports
   - Various visualizations (PNG files)
@@ -22,6 +24,13 @@ This repository contains code and analysis for Data Mining Assignment 1, focusin
   - `program_name_mapping.txt`: Mapping of original to normalized program names
   - `data_cleaning_report.txt`: Detailed cleaning methodology
   - Various comparison visualizations (PNG files)
+
+- `task1c_outputs/`: Contains Task 1c visualizations and analysis
+  - `feature_engineering_summary.txt`: Detailed description of all engineered features
+  - `categorical_features_distribution.png`: Distribution of categorical features
+  - `numeric_features_distribution.png`: Distribution of numeric features
+  - `binary_features_distribution.png`: Distribution of binary features
+  - `feature_correlations.png`: Correlation matrix of engineered features
 
 - Documentation:
   - `requirements.txt`: Required Python packages
@@ -45,15 +54,20 @@ This repository contains code and analysis for Data Mining Assignment 1, focusin
    python scripts/task1b_data_cleaning.py
    ```
 
-4. View the generated visualizations in the respective output directories
+4. Run the Task 1c feature engineering script:
+   ```
+   python scripts/task1c_feature_engineering.py
+   ```
+
+5. View the generated visualizations in the respective output directories
 
 ## Task Overview
 
-### Task 1a: Exploratory Data Analysis
-Performs exploratory data analysis on the ODI-2025 dataset to understand its structure, distributions, and relationships between variables. Generates visualizations and statistical summaries.
+### Task 1a: Exploratory Data Analysis (EDA)
 
 ### Task 1b: Data Cleaning and Standardization
-Cleans and standardizes the ODI-2025 dataset by removing extreme values, standardizing inconsistent data formats, normalizing program names, and imputing missing values.
+
+### Task 1c: Feature Engineering
 
 ## Future Tasks
 
